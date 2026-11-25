@@ -1,0 +1,209 @@
+# GOOGLE AI STUDIO PROMPT — SGS School Management System (V19.65+)
+
+> **AI Studio मध्ये हे करा:** (1) खालील संपूर्ण मजकूर Prompt म्हणून paste करा. (2) सोबत हे ४ फाइल्स attach करा: `Code.gs`, `index.html`, `script.js`, `style.css` (आणि स्क्रीनशॉट्स). Google Sheet / Apps Script च्या लिंक AI Studio उघडू शकत नाही, म्हणून फाइल्स attach करणे आवश्यक आहे.
+
+---
+
+## 0. ROLE AND GOAL
+
+You are a senior full-stack engineer. Build a **mobile-first, installable (PWA) school-management web application** for **श्री.गोविंदराम सेक्सरिया हायस्कूल, पाचोरा (SGS Highschool, Pachora)**, UDISE 27031201718.
+
+The application **already exists and works in production** as `index.html + script.js + style.css` (attached, "V19.65") talking to a **Google Apps Script web app** (`Code.gs`, attached). Your job is to **re-create the same application in a clean, modern, maintainable codebase** (React + TypeScript + Vite + Tailwind, or equivalent) with **100% feature parity**, while the **Apps Script backend stays exactly as it is**.
+
+**Treat the attached `Code.gs`, `index.html`, `script.js` and `style.css` as the single source of truth.** If this prompt and the attached files ever disagree, the attached files win. Read them fully before writing code.
+
+Reference links (for your information; you cannot open private ones):
+- Live app (GitHub Pages): https://tonapesir.github.io/SGS-School_Management_System_New/
+- Google Sheet (data store): https://docs.google.com/spreadsheets/d/1o0SJpf1fiZE7T1pZs9wMon2Mym4FtcD1dp4_NLZWBUE/edit
+- Apps Script web app (backend, `/exec`): `https://script.google.com/macros/s/AKfycbwxuyhQrvIUeghpGyqsK4SXvqlPv1rfcSalV90b67LIhDCgo4k3j0bK7ef3ZZUCdEA/exec`
+
+---
+
+## 1. NON-NEGOTIABLE RULES
+
+1. **Do NOT omit any module, page, tab, button, field, report or certificate** that exists in the current `index.html`. Every item listed in section 7 must exist in the new app. If unsure, copy the behaviour from `script.js`.
+2. **Do NOT rewrite, rename or "improve" the backend.** No new Apps Script functions are required. All action names, parameter names and JSON response shapes must be used **exactly** as `Code.gs` defines them. Do not invent endpoints. Do not ask me to modify `Code.gs`.
+3. **Never read Google Sheets directly** (no Sheets API, no API key, no OAuth, no CSV publish links). The Sheet is **container-bound** to the Apps Script (`SpreadsheetApp.getActiveSpreadsheet()`); the app reads **every sheet tab** only **through the Apps Script actions** (section 5 maps each sheet to its actions). The app must therefore be able to display data from **all** sheets listed in section 4.
+4. **The Apps Script URL must be configurable** in the UI (the current app has a URL config bar with input `#sheetsUrl`, stored in the browser). Pre-fill it with the `/exec` URL above. Add a "Test connection" button that calls `action=ping`.
+5. **UI language is Marathi (Devanagari).** Keep every label, heading, button text, emoji and message exactly as in the current app (Marathi strings + the English technical labels such as "LC Issue", "History / Export", "Student Profile"). Do not translate to English.
+6. **Security:** passwords are never stored in the browser. Login is token based (section 3). Role restrictions must be enforced in the UI **and** respected as the server enforces them.
+7. Do not use `localStorage` for anything other than what the current app already stores (section 9). Do not send any student data to any third-party service. Do not call the Gemini API from the app (no AI feature is requested).
+8. Output a complete runnable project (file tree, `package.json`, all source files), plus a short README with deploy steps (GitHub Pages / any static host). The app is a **static front end**.
+
+---
+
+## 2. TECH STACK
+
+- React 18 + TypeScript + Vite, Tailwind CSS (or CSS variables, see theme in section 8), a small state store (Zustand/Context). Hash-less client routing that mirrors the page ids below (`dashboard, student, lc, bonafide, attendance, search, history, profile, users, stats, maintenance, classinfo, report, superadmin, attanalytics, earlyleave, scholarship, teacherlist, archive, dataqc, help, teacher`).
+- Libraries the current app uses (keep equivalents with the same capabilities):
+  - **jsPDF 2.5.1 + html2canvas 1.4.1** → all PDF exports/prints (A4)
+  - **SheetJS xlsx 0.18.5** → Excel exports
+  - **PizZip 3.1.8 + docxtemplater 3.49.0** and **html-docx-js 0.3.1** → Word (.docx) for LC / Bonafide / Attendance
+  - **FileSaver.js 2.0.5**, **qrcodejs 1.0.0** (QR on certificates / verify)
+- Fonts (Google Fonts): **Mukta**, **Noto Sans Devanagari**, **Noto Serif Devanagari**, **Poppins**. Marathi text must render correctly in PDFs (use html2canvas on a rendered DOM, as the current app does, not raw jsPDF text).
+- **PWA:** `manifest.json` (theme colour `#1a2a4a`, icons 192/512), service worker with **network-first** strategy for app files, "📲 अॅप म्हणून Install करा" button (beforeinstallprompt).
+
+---
+
+## 3. BACKEND PROTOCOL (copy exactly)
+
+**Transport (GET, JSONP first, fetch fallback):**
+- Every request = `GET {SCRIPT_URL}?action=<name>&<params>&token=<token>&callback=<cbName>&t=<Date.now()>`; all values `encodeURIComponent`'d; null/undefined → empty string.
+- Primary: JSONP by injecting a `<script>` with a unique callback name `_gssCb_<ts>_<rand>` (a separate script tag and callback for **each** request so parallel requests never clash). Timeout **25 s** → `{status:'timeout'}`.
+- If the script tag errors → retry once with `fetch(url, {method:'GET', redirect:'follow'})`; strip the `callback(...)` wrapper with a regex if present, then `JSON.parse`.
+- Long-running actions (e.g. `photoRecall`) use the fetch path, not JSONP.
+- Uploads/POST (photo chunks etc.): `fetch(url, {method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:URLSearchParams})`.
+- The server also accepts `GET` with `regNo/studentId/firstName` and **no action** as `upsert` (legacy) — you do not need this.
+
+**Response:** JSON `{status:'ok'|'error'|'notfound', message?, code?, ...data}`.
+Known error codes: `auth` (session expired → auto logout with toast "🔒 Session संपले — कृपया पुन्हा Login करा."), `badcred`, `locked` (8 wrong attempts → 15 min), `badrole`, `forbidden`, `runlost`, `relogin`.
+
+**Auth:**
+- `action=login&username=..&password=..` (public) → `{status:'ok', token, exp, user:{username, role, label, assignedClass}}`. Token is HMAC signed, **12 hours** TTL. Public actions without token: `ping`, `login`, `verify`.
+- Attach `token` to every other request. The token carries the role and (for teachers) the class; the server overrides class parameters for teachers — never trust UI-only filtering.
+- `action=ping` → `{status:'ok', message:'Connected! Sheet: <name>', version:'V19.65', acYear:'2026-27'}`; compare `version` with the app version; show the academic-year badge from `acYear`.
+- Session kept in `sessionStorage` (keys `sgs_login_user`, session key). Logout clears it.
+
+**Roles (exact page access):**
+
+| Role | Allowed pages (default landing page first) |
+|---|---|
+| `super` | dashboard, student, lc, bonafide, attendance, search, history, users, profile, stats, maintenance, classinfo, report, superadmin, attanalytics, earlyleave, scholarship, teacherlist, archive, dataqc, help |
+| `master` | same as super **except** `superadmin` and `dataqc` |
+| `deo` (Data Operator) | **student**, search, history, users, profile, teacherlist, help |
+| `cert` | **bonafide**, attendance, search, history, users, profile, help (only certificate fields editable: bf_regNo, bf_stxt2, bf_stxt57, bf_stxt3, bf_stxt3_sel, bf_stxt6; at_regNo, at_stxt2, at_stxt57, at_stxt3, at_stxt3_sel, at_stxt16, at_stxt17, at_stxt5, at_stxt6, at_stxt14) |
+| `teacher` (वर्ग शिक्षक) | **teacher**, profile, report, earlyleave, scholarship, help — limited to own class (`assignedClass` = `"<इयत्ता>|<तुकडी>"`) |
+| `peon` (शिपाई) | **earlyleave**, search, profile, teacherlist, help — server allows only: getAll, getEarlyLeavePeon, markEarlyLeaveOut, changePassword, getPhotoData, getClassTeachers, logClientErrors |
+
+Body gets class `role-<role>`; elements marked `master-only`, `super-only`, `data-master-only` are hidden for other roles. Unauthorised page → redirect to the role's default page.
+
+---
+
+## 4. GOOGLE SHEET — ALL TABS THE APP MUST READ/WRITE
+
+(Headers in the exact order of `Code.gs`. Student data is mapped by position, so never reorder.)
+
+**Core sheets**
+- **Students** (31 cols; A→AE): Timestamp, Acad Year, Reg No, Student ID, Book No, Aadhar, Class, Division, PEN, Roll No, Full Name, Mother Name, Gender, Religion, Caste, Sub-caste, DOB, DOB Words, Nationality, Mother Tongue, Birth Place, Previous School, Admission Date, Admission Class, Contact, Address, **Photo URL (col 27 = AA)**, WhatsApp Mobile No, Alternate Mobile No, Category, Minority.
+  `getAll` returns each row as: `_rowIndex, acYear, regNo, studentId, bookNo, aadhar, iyatta, tukdi, pen, rollNo, firstName, motherName, gender, religion, caste, subcaste, dob, dobWords, nationality, motherTongue, birthVillage, prevSchool, admissionDate, admissionClass, contact, address, photoUrl, whatsappMobile, alternateMobile, category, minority`. Use these exact JSON keys in forms/saves.
+- **LC** (37 cols): Timestamp, Serial No, Student ID, Full Name, Gender, DOB, DOB Words, Class, Religion, Caste, Nationality, Mother Tongue, Admission Date, Admission Class, Leave Date, Leave Class, Class Start Date, LC No, LC Date, Conduct, Progress, Stxt75, Stxt76, Remarks, Medium, Next School, LC Count, Fee Status, Stxt60, Stxt61, Stxt62, Stxt63, Stxt67, Stxt68, Stxt69, Stxt70, Nationality Type.
+- **Bonafide** (19): Timestamp, Serial No, Student ID, Full Name, DOB, DOB Words, Class, Tukdi, Religion, Caste, Nationality, Acad Year, BF Date, Purpose, Admission Date, Admission Class, Remarks, Address, Contact.
+- **Attendance** (certificate sheet, 17): Timestamp, Serial No, Student ID, Full Name, Gender, DOB, Class, Tukdi, Acad Year, AT Date, Purpose, Total Days, Present Days, Percentage, From Date, To Date, Remarks.
+- **Users**: Username, Password, Role, Label, AssignedClass, Mobile No. (passwords are hashed/checked server-side; never display them).
+- **Class_Teacher**: A Class (e.g. 5th-A), B Class (5 वी), C Div (अ), D EMPLOYEE NAME, E कर्मचारी नाव, F MOB NO, G Emp Short Name.
+
+**Class-teacher module sheets**
+- **Attendance_YYYY_MM** (monthly daily attendance; legacy `DailyAttendance`): Timestamp, Date, Class, Division, RegNo, StudentId, FullName, Reason, MarkedBy. Plus **AttMarks_*** (Date, Class, Division, Total, Absent, Present, MarkedBy, SavedAt).
+- **Notices**: Timestamp, Date, Title, Message, PostedBy, TargetClass.
+- **Diary / Diary_***: Timestamp, Date, RegNo, StudentId, FullName, Class, Division, Type, Remark, EnteredBy.
+- **Transport / Transport_***: Timestamp, RegNo, StudentId, FullName, Class, Division, NativeVillage, TravelMode, TransportContact, UpdatedBy.
+- **Fees**: Timestamp, RegNo, StudentId, FullName, Class, Division, AcYear, TotalFee, FeePaid, PendingFee, UpdatedBy. **FeesSummary / FeesSummary_***: RegNo, StudentId, FullName, Class, Division, AcYear, FeePaid, LastPaidAt, LastAmount, Installments, UpdatedBy, OpeningDue.
+- **StudentContacts**: Timestamp, RegNo, StudentId, FullName, Class, Division, WhatsAppMobile, OtherMobile, UpdatedBy.
+- **Scholarship_<year>** (+ Deleted_Scholarship): Id, Timestamp, AcYear, RegNo, StudentId, FullName, Class, Division, ScholarshipName, Scheme, Amount, Status (प्रलंबित / मंजूर / वितरित), Remark, UpdatedBy, UpdatedAt.
+- **EarlyLeave** (legacy) and weekly **EL_<Monday date>** sheets: Timestamp, Date, Class, Division, RegNo, StudentId, FullName, Type (परवानगी / विनापरवानगी), Period, RecordedBy, RecordedRole, Status, MarkedBy, MarkedAt.
+
+**System / admin sheets**
+- **Log**, **Log_Archive**, **Log_Unparsed** (Timestamp, User, Role, Action, Reference), **Student_Audit** (Timestamp, User, Role, RegNo, Action, Field, Old, New), **User_Audit** (Timestamp, By, ByRole, Username, Action, Field, Old, New), **PromotionLog** (Timestamp, BatchId, RegNo, FullName, OldClass, OldDivision, OldAcYear, NewClass, NewAcYear, By, Undone), **ClientErrors** (Time, User, Role, AppVer, Page, UA, Type, Message, Stack, Count), **Perf_Log**, **Usage_*** (Hour, Action, Samples, EstCount, AvgMs, MaxMs, Errors, LockWaitAvgMs, LockWaitMaxMs, LockFails, SampleRate), plus archive/backup sheets and external files (`SGS_Data`, `SGS_Deleted_Backup`, backup copies in Drive, photo folder `SGS_StudentPhotos`).
+
+> The app must expose the data of **all of these** through the screens in section 7 (students, certificates, attendance, diary, transport, fees, contacts, scholarship, early-leave, teachers, users, logs/audit, archive, promotion, performance/usage, errors, backups).
+
+---
+
+## 5. ACTION CATALOG (use these exact names; all via the transport in section 3)
+
+- **Session/system:** `login`, `verify`, `ping`, `changePassword`, `logClientErrors`, `getSecurityStatus`
+- **Students:** `getAll` (full roster; cache client-side), `search` (param `q`), `save`/`update`/`upsert` (student form fields, plus `iyatta`,`tukdi`), `deleteStudent`, `getStudentHistory`, `getStudentYearHistory`, `getStudentAudit`, `getStudentContacts`/`saveStudentContact`, `updateClassDivision`, `getClassStudents`, `getClassList`, `getTodayBirthdays`
+- **Photos:** `uploadPhoto`, `photoChunkStart`/`photoChunk`/`photoChunkFinish` (chunked upload; **image must be compressed to < 10 KB JPG**; file named `<RegNo>.jpg`), `getPhotoData`, `getPhotoUrl`, `testPhotoFolder`, `photoRecall` (Super only; params `dry`=1/0, `runId`; loops until `done`; see section 7.18)
+- **Certificates:** `save_lc`/`update_lc`/`upsert_lc`, `save_bf`/`upsert_bf`, `save_at`/`upsert_at`, `getLCByReg`, `getAllCertificates` (History/Export)
+- **Dashboard & stats:** `getDashboardStats`, `getAnalyticsData`, `getStatsReport`, `getDailySummary`, `getAttendancePending`, `getAttendanceOverview`, `getAttendanceAnalytics`, `getAcYearInfo`, `getYearStatus`, `getMyLog`
+- **Class teacher:** `getTeacherDashboard`, `saveAttendance`, `getAttendance`, `getNotices`/`saveNotice`, `getDiary`/`saveDiary`, `getTransport`/`saveTransport`, `getFees`/`saveFees`/`saveTotalFee`, `getClassTeachers`
+- **Early leave:** `getEarlyLeave`, `saveEarlyLeave`, `getEarlyLeavePeon`, `markEarlyLeaveOut`
+- **Scholarship:** `getScholarship`, `saveScholarship`, `deleteScholarship`
+- **Users:** `getUsers`, `saveUser`, `deleteUser`, `getUserAudit`
+- **Archive:** `getArchiveYears`, `getArchiveReport`, `getArchiveHealth`
+- **Super/admin:** `getPendingFeesAll`, `previewPromotion`, `promoteStudents`, `undoPromotion`, `startNewYear`, `archiveYear`, `archivePassedOut`, `restorePassedOut`, `renumberRolls`, `syncStudentsAcYear`, `getYearEndCheck`, `getYearEndWizard`, `setYearEndStep`, `getDataQuality`, `getSheetCapacity`, `getSheetSizes`, `shrinkSheets`, `rebuildFeesSummary`, `getClientErrors`, `getUsageStats`, `getRestoreDrill`, `runRestoreDrill`, `getBackupStatus`, `runBackup`, `setBackupSchedule`, `backupArchiveFile`, `archiveLogNow`, `migrateLogs`
+
+(Read each function in `Code.gs` for the exact parameters, role checks and response fields before wiring a screen.)
+
+---
+
+## 6. NAVIGATION AND LAYOUT (from the screenshots)
+
+- **Mobile (primary):** top bar = ☰ hamburger (left), page title with emoji + user label under it (e.g. "🏠 मुख्यपृष्ठ / Master User"), 🔄 refresh and ⚙️ settings (URL config) on the right.
+- **Drawer menu** (slides from the left, dark navy): header card "🏫 SGS हायस्कूल पाचोरा / Master User (user_1)", then label "मेनू", then items (active item has a gold-tinted pill): 🏠 मुख्यपृष्ठ, 👤 विद्यार्थी माहिती, 📋 LC Issue, 📄 बोनाफाईड, ✅ उपस्थिती प्रमाणपत्र, 🔍 विद्यार्थी शोधा, 📁 History / Export, 🪪 Student Profile, 👥 User Management, 📊 सांख्यिकी अहवाल, 🔧 मेंटेनन्स, 🏫 वर्ग माहिती, 📑 रिपोर्ट, 🛡️ Super Admin, 📈 हजेरी विश्लेषण, 🚪 घरी जाणारे, 🎓 शिष्यवृत्ती, 📒 वर्ग शिक्षक यादी, 📦 Archive, 🔎 डेटा तपासणी, 🏫 वर्ग शिक्षक, ❓ मदत. Items are filtered by role. Teachers get the drawer entries 📊 डॅशबोर्ड, 👥 विद्यार्थी माहिती, ✅ हजेरी, 📔 विद्यार्थी डायरी, 💰 फी, 🔔 सूचना, 📈 विश्लेषण, 🔧 मेंटेनन्स (these switch teacher-page tabs).
+- **Desktop:** same header (gradient navy, 2 px gold bottom border) with a horizontal/side navigation.
+- **Dashboard (मुख्यपृष्ठ)** top to bottom: school banner card (श्री.गोविंदराम सेक्सरिया हायस्कूल, पाचोरा · "UDISE - 27031201718 | <today dd-mm-yyyy>" · pill "📅 शैक्षणिक वर्ष: 2026-27" which opens the academic-year panel for super/master; red ⚠️ if the sheet year differs, with a loading spinner ring on the banner); six stat cards (एकूण विद्यार्थी, मुले, मुली, आजचे LC, आजचे बोनाफाईड, महिना प्रमाणपत्रे); **"⚡ जलद कृती (Quick Actions)"** grid of 3 columns with one tile per page the role may open (20 tiles for super: विद्यार्थी माहिती, LC Issue, बोनाफाईड, उपस्थिती प्रमाणपत्र, विद्यार्थी शोधा, History / Export, Student Profile, User Management, सांख्यिकी अहवाल, मेंटेनन्स, वर्ग माहिती, रिपोर्ट, Super Admin, हजेरी विश्लेषण, घरी जाणारे, शिष्यवृत्ती, वर्ग शिक्षक यादी, Archive, डेटा तपासणी, मदत); each tile has an emoji and title, and a subtitle on desktop (copy subtitles from `index.html`); then the panels below: "📋 आजची हजेरी — कोणी भरली नाही?" (🔄 Refresh), "📋 रोजचा सारांश" (date + 🔄 दाखवा, 📋 कॉपी, 💬 WhatsApp, 🖨️ PDF), "🎂 आज वाढदिवस असलेले विद्यार्थी", "📢 सूचना पाठवा" (शीर्षक, कोणासाठी, तपशील + recent notices), class-wise chart (`dashClassChart`) and the analytics block (`anaBody`, admissions).
+- Footer line: "School Management System | Software Developed by Tonape sir (SGS Highschool, Pachora)".
+- **Login screen** (body `auth-locked`): school name, "School Management System Login", "🔄 प्रथम शाळेशी जोडा (जलद व सुरक्षित Login साठी)" (warm-up `ping`), Username, Password, checkbox "📴 या उपकरणावर ३ दिवस ऑफलाइन Login साठी लक्षात ठेवा (इतरांच्या/सार्वजनिक फोनवर टिक काढा. Logout केल्यास पुसले जाते.)", gold Login button.
+
+**Hardware/back button behaviour (must be implemented):** Back button (browser, Android, installed PWA) and the Backspace key (when not typing in an input) must go **directly to the user's home page** (dashboard / role default page); an open certificate modal closes first; on the home page the first Back shows the toast "बाहेर पडण्यासाठी पुन्हा Back दाबा" and a second Back within 2 s exits. Teacher sub-tabs return to the teacher "dash" tab first.
+
+---
+
+## 7. PAGES — FEATURE PARITY CHECKLIST (nothing may be dropped)
+
+1. **विद्यार्थी माहिती नोंदणी (student)** — search by Reg No (🔍 शोधा, 🗑️ Clear); form fields: शै.वर्ष, रजिस्टर नं., स्टुडंट आय.डी.नं., बुक नं., लिंग, 📷 फोटो, आधार कार्ड नं., इयत्ता, तुकडी, PEN नं., **रोल नं.**, संपूर्ण नाव (Full Name), आईचे नाव, धर्म, जात, पोटजात, प्रवर्ग (Category), Minority, जन्म दिनांक, जन्म दिनांक (अक्षरी — auto-generated in Marathi words), राष्ट्रीयत्व, मातृभाषा, जन्मस्थळ, या पूर्वीची शाळा, प्रवेश दिनांक, प्रवेशावेळी इयत्ता, पत्ता, WhatsApp Mobile No., Alternate Mobile No. Buttons: 💾 नवीन Save करा, ✏️ Update करा, 📤 फोटो Upload/Update (compress < 10 KB), 🔧 Drive Test, 📥 PDF Export. Academic year auto-filled with the current year on save; Students column B must stay in sync.
+2. **LC Issue** — search; fields: Student ID/Reg No, name, gender, DOB (+अक्षरी), इयत्ता, Birth Place (auto), जात, धर्म, राष्ट्रीयत्व, मातृभाषा, प्रवेश दिनांक, प्रवेशावेळी इयत्ता, शाळा सोडल्याची तारीख, सोडताना इयत्ता, या वर्गात कधीपासून (महिना/वर्ष), LC No., LC दिनांक, TC/Conduct, Progress, Stxt75, Stxt76, Remarks, Medium of Instruction, पुढील शाळा, LC Count (Stxt78), Stxt79 (Fee Status), Stxt60–63 (Subject 1–4), Stxt67–70, Stxt80 (Nationality Type). Buttons: 💾 Save LC Data, ✏️ Update, 📋 LC दाखला पाहा / Print (A4 certificate modal), 📝 LC Word (.docx), 📥 LC PDF Export.
+3. **बोनाफाईड** — fields: Student ID/Reg No, name, DOB (+अक्षरी), इयत्ता, तुकडी, Birth Place, जात, धर्म, राष्ट्रीयत्व, शै.वर्ष, बोनाफाईड दिनांक, उद्देश (Purpose), प्रवेश दिनांक, प्रवेशावेळी इयत्ता, Remarks, पत्ता, संपर्क, **Certificate भाषा** (Marathi/English). Buttons: 💾 Save & Issue, 📄 पाहा / Print, 📝 Word, 📥 PDF.
+4. **उपस्थिती प्रमाणपत्र** — fields: Student ID/Reg No, name, लिंग, DOB, इयत्ता, तुकडी, शै.वर्ष, प्रमाणपत्र दिनांक, उद्देश, एकूण कामकाजाचे दिवस, उपस्थित दिवस, उपस्थिती % (auto), कालावधी From/To, Remarks, Certificate भाषा. Buttons: 💾 Save & Issue, ✅ पाहा / Print, 📝 Word, 📥 PDF; preview modal with ✕ बंद करा, 🖨️ Print, **🗂️ A4 वर २ प्रती**, 📥 PDF Download.
+   *Certificate rendering:* pixel-faithful to the current certificate CSS (A4 210×297 mm, bordered LC page; "a4-noborder" and "cert-compact" variants for BF/AT; dotted/boxed date cells `cbox`; school header with UDISE row; title box; signature lines; QR verify). Port the `.cert-*` CSS and templates from `style.css`/`script.js` as-is. Text colour on certificates is always black.
+5. **विद्यार्थी शोधा (search)** — filters: विद्यार्थ्याचे नाव, वडिलांचे नाव, आडनाव, जन्म तारीख, वर्ग, तुकडी, आधार क्रमांक; ⚡ Load Students (bulk `getAll` into a client cache); result table (फोटो, रजि. क्र., Student ID, संपूर्ण नाव, वर्ग, तुकडी, जन्म तारीख, आधार, कृती); 📄 Batch Print — Bonafide, ✅ Batch Print — Attendance; the "Apps Script Code दाखवा / Code.gs Copy / Manifest Copy" helper block (Super/Master).
+6. **History / Export** — by Student ID / रजि. क्र.: table (Type LC/BF/AT, Serial No., दिनांक, तपशील), 🔎 इतिहास पहा, 📥 Excel Report Download.
+7. **Student Profile** — input Reg No/Student ID/Aadhar + शैक्षणिक वर्ष; photo + complete data; buttons 🔎 Profile पहा, 🕑 बदलांचा इतिहास पहा (Student_Audit), 📚 सर्व वर्षांचा इतिहास (+⏹ थांबवा), 📄 PDF (A4), 📂 फी / प्रवास पहा (💰 फी दाखवा, 🚌 प्रवास दाखवा), 📤 Profile photo WhatsApp वर पाठवा; "⬅ वर्ग शिक्षक कडे परत" for teachers.
+8. **User Management** — list (Username, Role, Label, वर्ग, मोबाईल, कृती) + form (Username, Password, Role, Label, मोबाईल क्रमांक (WhatsApp), वर्ग, तुकडी) with 💾 Save User / 🗑️ Clear / delete; 🔑 Password बदला (जुना/नवीन). Roles available: super, master, deo, cert, teacher, peon. Show User_Audit.
+9. **सांख्यिकी अहवाल (stats)** — 🔄 Refresh; tables: वर्ग × (एकूण विद्यार्थी, हजर, गैरहजर) and वर्ग × एकूण जमा फी (₹); plus category and age reports (`getStatsReport`).
+10. **मेंटेनन्स** — (a) "विद्यार्थ्यांचा वर्ग/तुकडी बदल": 🔍 Reg No → नवीन वर्ग, नवीन तुकडी → 💾 बदल जतन करा (`updateClassDivision`); (b) "💰 शाळेची एकूण फी ठरवा": नवीन एकूण फी (₹) → 💾 जतन करा (`saveTotalFee`, shown via `feeLoadCurrentTotal`); (c) "🗑️ विद्यार्थी Delete करा": 🔍 Reg No → 🗑️ कायमचे Delete करा with confirmation (backed up server-side first).
+11. **वर्ग माहिती (classinfo)** — वर्ग + तुकडी → 🔍 पहा; "👥 विद्यार्थी यादी" (Roll, नाव, लिंग, DOB, WhatsApp/Alternate Mobile, कृती = call/WhatsApp) and "📔 Student Diary नोंदी" (तारीख, विद्यार्थी, प्रकार, तपशील, नोंदवणारे वर्ग शिक्षक).
+12. **📑 रिपोर्ट (report)** — filters: वर्ग (सर्व, 5th…10th), तुकडी (सर्व, अ ब क ड इ फ ग ह आय), caste/category/gender/fee filters, **"Column Field निवडा"** checkboxes each with an order number: Full Name, Reg No, **Roll No. (रोल नंबर)** *(must be present, order 3, so reports can include Roll No.)*, PEN, Class, Division, Student ID, Aadhar, Gender, Caste, DOB, Contact, Address, WhatsApp Mobile No, Category, Minority; "💰 फी दिलेले विद्यार्थी (+जमा रक्कम)" / "⚠️ फी बाकी असलेले विद्यार्थी (+जमा रक्कम)"; रिपोर्ट उद्देश/शीर्षक (printed on the PDF), PDF Page Orientation (portrait/landscape), **क्रम (Order)** dropdown: जसे आहे तसे (Reg No क्रमाने), मुली प्रथम, मुलं प्रथम, नावानुसार (अ ते ज्ञ), **Roll No. क्रमाने** *(numeric ascending 1,2,10; empty roll numbers last; ties by Reg No; grouping by class and division is kept)*. Buttons: 📋 यादी तयार करा (preview table with अ.क्र.), 📥 PDF Export (A4, uses the same chosen columns/order).
+13. **Super Admin** (super only) — 🔐 सुरक्षा स्थिती; 💰 शाळा-व्यापी फी थकबाकी यादी (📋 यादी तयार करा, 📊 Excel, 📥 PDF; columns अ.क्र., नाव, वर्ग, Roll, जमा, मागील बाकी, एकूण बाकी, मोबाईल, 📲 WhatsApp); 🎓 वर्ग-बढती (नवीन शैक्षणिक वर्ष, confirm text `PROMOTE`, 🎓 बढती द्या, preview + undo); 📅 शैक्षणिक वर्ष व Archive (नवे वर्ष सुरू करा [confirm `NEWYEAR`, "मागील थकबाकी पुढे न्या"], जुने वर्ष हलवा [confirm `ARCHIVEYEAR`]); 📊 कामगिरी व साठवण (🔄 Refresh, ✂️ रिकामी जागा कमी करा, 🔧 FeesSummary पुन्हा बांधा); 🧹 वर्षअखेर साफसफाई (📦 Archive करा [confirm `ARCHIVE`], 🔢 Roll No. बदला [confirm `RENUMBER`, क्रम option]); 📷 फोटो लिंक पुन्हा जोडा; 💾 आपोआप Backup (वेळापत्रक, इतर Spreadsheet ID, failure e-mail, 💾 जतन करा, ▶️ आत्ताच Backup घ्या, 🔍 Backup तपासणी, 🗂️ Log → मासिक Sheets).
+14. **हजेरी विश्लेषण (attanalytics)** — filters वर्ग/तुकडी, महिना, सलग दिवस (किमान); 📊 वर्गनिहाय सारांश + "मासिक उपस्थिती व सलग गैरहजेरी"; 📊 विश्लेषण पहा, 📥 PDF; WhatsApp message to parents.
+15. **घरी जाणारे (earlyleave)** — "आज घरी जाण्याची परवानगी मिळालेले विद्यार्थी" (🔄 Refresh); "✍️ नोंद करा" (वर्ग/तुकडी, दिनांक, 📅 आज, Load, rows with ✅ परवानगी / ⚠️ विनापरवानगी, Period, 💾 नोंदी Save करा); "📋 नोंदींची यादी" (filters सर्व / परवानगी / विनापरवानगी) with call/WhatsApp to parents; **peon** view: mark-out (`markEarlyLeaveOut`).
+16. **शिष्यवृत्ती** — "🔎 यादी व सारांश" (वर्ग/तुकडी, शैक्षणिक वर्ष, स्थिती, शोध) and "✍️ नवीन नोंद" (विद्यार्थी, शिष्यवृत्तीचे नाव *, योजना, रक्कम (₹), स्थिती प्रलंबित/मंजूर/वितरित, शेरा; 💾 Save, ✖ Edit रद्द करा; delete).
+17. **वर्ग शिक्षक यादी (teacherlist)** — "वर्गनिहाय वर्ग शिक्षक", 🔍 शोधा, 🔄 Refresh, call + WhatsApp buttons (from `Class_Teacher`).
+18. **Archive (master/super)** — शैक्षणिक वर्ष selector, 📥 लोड करा, tabs 💰 फी, 🚌 प्रवास, ✅ हजेरी, 🎓 शिष्यवृत्ती, 📊 तुलना, 🗜️ सर्व CSV (ZIP), 🩺 Archive तपासणी; read-only + CSV export.
+19. **डेटा तपासणी (super)** — 🔎 डेटा गुणवत्ता, 🗓️ वर्ष-अखेर पूर्वतपासणी, 📏 Sheet आकार, 🐞 त्रुटी (ClientErrors), 📈 वापर (Usage/Perf), 🎓 वर्ष-अखेर मार्गदर्शक (wizard with steps incl. "📅 वर्ष जुळवा…").
+20. **वर्ग शिक्षक (teacher) page** — header "📈 माझ्या वर्गाची मासिक उपस्थिती" and class label; tabs panels `dash` (totals, present/absent today, birthdays, absent girls/boys/total, birthday list, notices, category and age tables), `roster` (शोधा नाव/Reg No; Roll, नाव, लिंग, DOB, WhatsApp/Alternate, कृती), `att` (तारीख, 📅 त्या दिवसाची यादी उघडा, Roll/नाव/अनुपस्थित?/कारण, 💾 Attendance Save करा, contact list of absentees, report range पासून–पर्यंत with 📊 Report पहा, summary table), `diary` (विद्यार्थी निवडा; मूळ गाव, प्रवासाचे माध्यम, वाहतूक संपर्क क्रमांक → 💾 Save; प्रकार + तपशील → ➕ जोडा; history), `fees` (विद्यार्थी, आज जमा रक्कम (₹) → ➕ जमा नोंद करा; Roll, नाव, आजपर्यंत जमा, बाकी), `notices`, `ana` (महिना, सलग दिवस, 📊 विश्लेषण पहा, 📥 PDF), `maint` (🔍 Reg No → नवीन तुकडी → 💾 बदल जतन करा — own class only). A teacher can only see/modify the class in their token.
+21. **मदत (help)** — the complete user guide with role sections (वर्ग शिक्षक, DEO, Cert, मुख्याध्यापक/Master, Super Admin, शिपाई), login/offline sections, Pending Saves, troubleshooting table (अडचण / काय करावे), 📞 संपर्क. Port the text from `index.html`; also keep the PDF user guide link.
+22. **Photo-link recall (inside Super Admin)** — "📷 फोटो लिंक पुन्हा जोडा (Photo link recall)": checkbox "फक्त तपासा (dry run) — काहीही बदलत नाही" (default ON); button "▶️ तपासा" / "▶️ लिंक अद्ययावत करा" (when dry-run is off, requires typing `PHOTO` + confirm dialog); ⏹ थांबवा; repeatedly calls `photoRecall` (via fetch, not JSONP; same `runId`; up to 3 retries) until `done`; report table: तपासलेल्या फाइल्स, जुळलेले, अद्ययावत होतील/केले, आधीच बरोबर, फोटो नसलेले विद्यार्थी (+ sample Reg Nos), विद्यार्थ्याशिवायच्या फाइल्स, दुबार Reg No; after a real run clear the student cache. (Photos are matched by file name `<RegNo>.jpg` in the Drive folder; only column AA is updated.)
+
+---
+
+## 8. DESIGN SYSTEM (dark navy + gold, matches the screenshots)
+
+CSS variables: `--navy:#1a2a4a; --navy2:#223262; --navy3:#2c3e6b; --gold:#d4902a; --gold2:#e8b05a; --peach:#fdf0e6; --pb:#d4a87a; --txt:#f0e8d8; --orange:#c0521a; --orhov:#e06020; --green:#1a7a3a; --red:#7a1a1a; --blue:#1a4a7a; --r:6px; --sh:0 4px 20px rgba(0,0,0,.3)`.
+- Background deep navy; cards = slightly lighter navy with 1 px gold-tinted border and rounded 10–14 px corners; headings in gold (`--gold2`); body text `--txt`; primary buttons gold (`btn-gold`, text `#1a2a4a`), secondary orange, success green, danger red.
+- Header gradient `linear-gradient(90deg, var(--navy3), var(--navy2))` with `border-bottom: 2px solid var(--gold)`.
+- Fonts: Mukta / Noto Sans Devanagari for UI, Poppins for Latin, Noto Serif Devanagari for certificate headings.
+- Stat cards: big numbers (gold, green for girls/LC counts), small grey labels. Quick-action tiles: icon on top, label below, rounded dark tiles.
+- Mobile first (≥360 px), safe-area insets, tables scroll horizontally inside their card, large touch targets. Respect `prefers-reduced-motion`.
+
+---
+
+## 9. CLIENT BEHAVIOUR TO PRESERVE
+
+- **Offline Login (3 days)** when the user ticks the box: port `offCredSave` / `offCredGet` / `offCredDelete` / `offCredPurge` from `script.js` exactly (do not store the plain password); offline session can view cached data only; "नेट आले आहे — पुन्हा Login करा" when saving is needed. Logout wipes it (unless session just expired).
+- **Stale-while-revalidate cache** in `localStorage` (prefix `sgs_swr:` + app version + username): roster of a teacher 3 days, other 24 h, max 300 KB per entry / 1 MB total; **never cache** anything matching `fee|thakbaki|arrear|payment|receipt`. Show an offline/"ताजी माहिती" bar when stale.
+- **Pending Saves** queue for saves made without internet, retried automatically when online (see the मदत page section "Pending Saves").
+- **Client error reporting** (`logClientErrors`): window.onerror + unhandledrejection, scrubbed of phone numbers, Reg No, e-mail and URL queries; rate limited (5/min, 30/session, queue key `sgs_errq_v1`, max 50).
+- **Student cache** (`getAll`) used by Search/Profile/Report; clear it after any save that changes students or photo links.
+- **Warm-up `ping`** before login ("🔄 प्रथम शाळेशी जोडा"), exactly like `script.js`.
+- **WhatsApp / call links:** `https://wa.me/91<10-digit>?text=...` and `tel:` for parents and teachers; Marathi message templates are in `script.js`.
+- Dates are `dd-mm-yyyy` in the UI; server returns formatted DOB/admission dates.
+
+---
+
+## 10. DELIVERABLES AND ACCEPTANCE CHECKLIST
+
+Deliver the full project and then walk through this checklist in your final answer, marking each item ✅ or explaining the gap:
+
+1. Login works for all six roles; each role sees exactly the pages in section 3; teacher is locked to own class; peon sees only allowed pages.
+2. Every page in section 7 exists, with all fields, buttons, tables and exports.
+3. Every sheet in section 4 is reachable through some screen via the listed actions (no direct Sheets access).
+4. Certificates (LC, Bonafide, Attendance) look identical to the current ones and export to Print/PDF/Word; "A4 वर २ प्रती" works.
+5. Report page includes **Roll No. column** and **Roll No. क्रमाने** ordering.
+6. Back button / Backspace goes to the home page with the "पुन्हा Back दाबा" exit logic.
+7. Photo upload (<10 KB) and **Photo link recall** work; column AA gets the `https://drive.google.com/thumbnail?id=<fileId>&sz=w1000` URL.
+8. App is installable (PWA), works offline for cached views, and survives token expiry gracefully.
+9. No change to `Code.gs` was needed; the Apps Script URL is configurable; no secrets are hard-coded.
+
+If anything in the attached files is ambiguous, **ask me one question at a time instead of guessing**, and never delete or simplify a feature to make the build easier.

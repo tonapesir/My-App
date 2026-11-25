@@ -1,0 +1,6 @@
+{
+  "name": "SGS School",
+  "description": "Shri Govindram Seksaria High School, Pachora — Complete School Management System (Students, Certificates LC/BF/AT, Class Teacher Attendance/Diary/Fees, Early Leave, Scholarships, Reports, Analytics & Super Admin)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

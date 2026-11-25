@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">SGS School</string>
+    <string name="school_name_mr">श्री.गोविंदराम सेक्सरिया हायस्कूल, पाचोरा</string>
+    <string name="school_sanstha_mr">पाचोरा तालुका सहकारी शिक्षण संस्था संचलित,</string>
+    <string name="school_udise">UDISE - 27031201718</string>
+    <string name="login_subtitle">School Management System</string>
+    <string name="connect_school">प्रथम शाळेशी जोडा (जलद व सुरक्षित Login साठी)</string>
+    <string name="remember_offline_label">या उपकरणावर ३ दिवस ऑफलाइन Login साठी लक्षात ठेवा</string>
+    <string name="remember_offline_hint">इतरांच्या/सार्वजनिक फोनवर टिक काढा. Logout केल्यास पुसले जाते.</string>
+    <string name="login_btn">Login</string>
+    <string name="logout_btn">Logout</string>
+    <string name="username_label">Username</string>
+    <string name="password_label">Password</string>
+    <string name="pending_saves_title">Pending Saves — नेट नसताना केलेली Save</string>
+    <string name="offline_banner">ऑफलाइन — जतन केलेली माहिती दिसत आहे</string>
+</resources>
